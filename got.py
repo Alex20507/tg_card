@@ -8,7 +8,7 @@ TOKEN = os.getenv("TOKEN")
 bot = telebot.TeleBot(TOKEN)
 
 # ----------- ADMIN ID (для первого запуска) -----------
-ADMIN_ID = 123456789  # Заменить своим Telegram ID
+ADMIN_ID = 7070126954  # Заменить своим Telegram ID
 
 # ----------- DATABASE -----------
 conn = sqlite3.connect("database.db", check_same_thread=False)
@@ -296,3 +296,4 @@ def history(message, role):
 
 # ----------- RUN BOT -----------
 bot.infinity_polling()
+
