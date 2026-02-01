@@ -65,9 +65,12 @@ cursor.execute(
 conn.commit()
 
 # ---------- HELPERS ----------
-def get_main_keyboard():
+def get_main_keyboard(include_cancel=False):
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    keyboard.row("Меню", "Команды")
+    if include_cancel:
+        keyboard.row("Отмена")
+    else:
+        keyboard.row("Меню", "Команды")
     return keyboard
 
 def log_action(user_id, action, target_nickname=""):
@@ -121,15 +124,22 @@ def start(message, role):
 @bot.message_handler(commands=["addcard"])
 @access_required
 def addcard(message, role):
-    bot.send_message(message.chat.id,
+    bot.send_message(
+        message.chat.id,
         "Вставьте карточку целиком в формате:\n"
         "Имя: ...\nВозраст: ...\nАйди: ...\nЧасовой пояс: ...\nНик: ...",
-        reply_markup=get_main_keyboard()
+        reply_markup=get_main_keyboard(include_cancel=True)
     )
     user_states[message.from_user.id] = {"step": "wait_card"}
 
 @bot.message_handler(func=lambda m: m.from_user.id in user_states)
 def addcard_steps(message):
+    # Если нажали Отмена
+    if message.text == "Отмена":
+        bot.send_message(message.chat.id, "❌ Действие отменено", reply_markup=get_main_keyboard())
+        del user_states[message.from_user.id]
+        return
+
     state = user_states[message.from_user.id]
 
     if state.get("step") == "wait_card":
@@ -162,7 +172,7 @@ def addcard_steps(message):
 
         del user_states[message.from_user.id]
 
-# ---------- CHECK (ID + NICKNAME) ----------
+# ---------- CHECK ----------
 @bot.message_handler(commands=["check"])
 @access_required
 def check(message, role):
@@ -308,6 +318,35 @@ def deladmin(message, role):
         bot.send_message(message.chat.id, "🗑 Админ удалён", reply_markup=get_main_keyboard())
     except:
         bot.send_message(message.chat.id, "⚠️ Ошибка формата команды", reply_markup=get_main_keyboard())
+
+# ---------- BUTTONS HANDLER ----------
+@bot.message_handler(func=lambda m: True)
+@access_required
+def buttons_handler(message, role):
+    if message.text == "Меню":
+        bot.send_message(
+            message.chat.id,
+            "📌 Главное меню:\n"
+            "/addcard — добавить карточку\n"
+            "/check ID или НИК — поиск карточки\n"
+            "/history ID — история статусов\n"
+            "/list — список карточек",
+            reply_markup=get_main_keyboard()
+        )
+    elif message.text == "Команды":
+        msg = "📋 Все команды:\n\n" \
+              "🔹 Пользовательские:\n" \
+              "/addcard — добавить карточку\n" \
+              "/check ID или НИК — поиск карточки\n" \
+              "/history ID — история статусов\n" \
+              "/list — список карточек\n\n"
+        if role == "admin":
+            msg += "🛠 Админ команды:\n" \
+                   "/setstatus ID СТАТУС — изменить статус карточки\n" \
+                   "/addadmin ID НИК — добавить админа\n" \
+                   "/deladmin ID — удалить админа\n" \
+                   "/logs — посмотреть последние действия"
+        bot.send_message(message.chat.id, msg, reply_markup=get_main_keyboard())
 
 # ---------- RUN ----------
 bot.infinity_polling()
