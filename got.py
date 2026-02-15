@@ -4,7 +4,7 @@ from datetime import datetime
 from telebot import types
 import os
 
-TOKEN = os.getenv("TOKEN")  # Токен берём из переменных окружения
+TOKEN = os.getenv("TOKEN")  # Токен берётся из переменных окружения
 ADMIN_ID = 7070126954  # Твой Telegram ID для первого админа
 
 bot = telebot.TeleBot(TOKEN)
@@ -93,40 +93,36 @@ def get_role(user_id):
     r = cursor.fetchone()
     return r[0] if r else None
 
-def access_required(func):
-    def wrapper(message, *args, **kwargs):
-        role = get_role(message.from_user.id)
-        if not role:
-            bot.send_message(message.chat.id, "⛔ Нет доступа", reply_markup=get_main_keyboard())
-            return
-        return func(message, role, *args, **kwargs)
-    return wrapper
-
 user_states = {}
 
 # ---------- START ----------
 @bot.message_handler(commands=["start"])
 def start(message):
-    # Авто-добавление нового пользователя
     cursor.execute("SELECT role FROM users WHERE user_id=?", (message.from_user.id,))
     row = cursor.fetchone()
     if not row:
+        # Новый пользователь
         cursor.execute(
             "INSERT INTO users (user_id, role, nickname) VALUES (?, 'user', ?)",
             (message.from_user.id, message.from_user.first_name)
         )
         conn.commit()
     role = get_role(message.from_user.id)
-    bot.send_message(
-        message.chat.id,
-        f"🗂 Card Database Bot\nРоль: {role}\n\nИспользуйте кнопки внизу или команды",
-        reply_markup=get_main_keyboard(role)
-    )
+
+    if role == "admin":
+        text = "Здорово, а теперь запомни: вокруг тебя админы, бот и долбаебы, которые стопудово заполнят неправильно описание 😎"
+    else:
+        text = "Здорово, мозг админам не ебите 🙂 Правильно заполните все, по братски!"
+    bot.send_message(message.chat.id, text, reply_markup=get_main_keyboard(role))
 
 # ---------- ADD CARD ----------
 @bot.message_handler(commands=["addcard"])
-@access_required
-def addcard(message, role):
+def addcard(message):
+    role = get_role(message.from_user.id)
+    if not role:
+        bot.send_message(message.chat.id, "⛔ Нет доступа")
+        return
+
     if role == "admin":
         bot.send_message(
             message.chat.id,
@@ -185,79 +181,46 @@ def addcard_steps(message):
         except Exception as e:
             bot.send_message(message.chat.id, f"⚠️ Ошибка: формат неверный или ID уже есть\n{e}", reply_markup=get_main_keyboard(role))
         del user_states[message.from_user.id]
+        return
 
     # --- Обычный пользователь ---
-    elif state.get("step", "").startswith("user_add_"):
-        data = state.get("data", {})
-        if state["step"] == "user_add_name":
+    data = state.get("data", {})
+    step = state.get("step")
+    try:
+        if step == "user_add_name":
             data["name"] = message.text.strip()
             bot.send_message(message.chat.id, "Введите возраст:", reply_markup=get_main_keyboard(role, include_cancel=True))
             state["step"] = "user_add_age"
-        elif state["step"] == "user_add_age":
-            try:
-                data["age"] = int(message.text.strip())
-                bot.send_message(message.chat.id, "Введите ID:", reply_markup=get_main_keyboard(role, include_cancel=True))
-                state["step"] = "user_add_id"
-            except:
-                bot.send_message(message.chat.id, "⚠️ Введите число для возраста", reply_markup=get_main_keyboard(role, include_cancel=True))
-        elif state["step"] == "user_add_id":
+        elif step == "user_add_age":
+            data["age"] = int(message.text.strip())
+            bot.send_message(message.chat.id, "Введите ID:", reply_markup=get_main_keyboard(role, include_cancel=True))
+            state["step"] = "user_add_id"
+        elif step == "user_add_id":
             data["uid"] = message.text.strip()
             bot.send_message(message.chat.id, "Введите часовой пояс:", reply_markup=get_main_keyboard(role, include_cancel=True))
             state["step"] = "user_add_timezone"
-        elif state["step"] == "user_add_timezone":
+        elif step == "user_add_timezone":
             data["timezone"] = message.text.strip()
             bot.send_message(message.chat.id, "Введите ник:", reply_markup=get_main_keyboard(role, include_cancel=True))
             state["step"] = "user_add_nickname"
-        elif state["step"] == "user_add_nickname":
+        elif step == "user_add_nickname":
             data["nickname"] = message.text.strip()
             data["status"] = "active🟢"
             data["comment"] = ""
-            try:
-                cursor.execute("""
-                    INSERT INTO cards (name, age, uid, timezone, nickname, status, comment, added_by, date_added)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    data["name"], data["age"], data["uid"], data["timezone"],
-                    data["nickname"], data["status"], data["comment"],
-                    message.from_user.id, datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                ))
-                conn.commit()
-                log_action(message.from_user.id, "add_card", data["nickname"])
-                bot.send_message(message.chat.id, "✅ Карточка добавлена", reply_markup=get_main_keyboard(role))
-            except Exception as e:
-                bot.send_message(message.chat.id, f"⚠️ Ошибка: {e}", reply_markup=get_main_keyboard(role))
+            cursor.execute("""
+                INSERT INTO cards (name, age, uid, timezone, nickname, status, comment, added_by, date_added)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                data["name"], data["age"], data["uid"], data["timezone"],
+                data["nickname"], data["status"], data["comment"],
+                message.from_user.id, datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            ))
+            conn.commit()
+            log_action(message.from_user.id, "add_card", data["nickname"])
+            bot.send_message(message.chat.id, "✅ Карточка добавлена", reply_markup=get_main_keyboard(role))
             del user_states[message.from_user.id]
-
-# ---------- BUTTONS ----------
-@bot.message_handler(func=lambda m: m.text in ["Меню", "Команды", "Добавить карточку"])
-@access_required
-def buttons_handler(message, role):
-    if message.text == "Меню":
-        bot.send_message(
-            message.chat.id,
-            "📌 Главное меню:\n"
-            "/addcard — добавить карточку\n"
-            "/check ID или НИК — поиск карточки\n"
-            "/history ID — история статусов\n"
-            "/list — список карточек",
-            reply_markup=get_main_keyboard(role)
-        )
-    elif message.text == "Команды":
-        msg = "📋 Все команды:\n\n" \
-              "🔹 Пользовательские:\n" \
-              "/addcard — добавить карточку\n" \
-              "/check ID или НИК — поиск карточки\n" \
-              "/history ID — история статусов\n" \
-              "/list — список карточек\n\n"
-        if role == "admin":
-            msg += "🛠 Админ команды:\n" \
-                   "/setstatus ID СТАТУС — изменить статус карточки\n" \
-                   "/addadmin ID НИК — добавить админа\n" \
-                   "/deladmin ID — удалить админа\n" \
-                   "/logs — посмотреть последние действия"
-        bot.send_message(message.chat.id, msg, reply_markup=get_main_keyboard(role))
-    elif message.text == "Добавить карточку":
-        bot.send_message(message.chat.id, "Используйте команду /addcard для добавления карточки", reply_markup=get_main_keyboard(role))
+    except Exception as e:
+        bot.send_message(message.chat.id, f"⚠️ Ошибка: {e}", reply_markup=get_main_keyboard(role))
 
 # ---------- RUN ----------
 bot.infinity_polling()
