@@ -5,7 +5,7 @@ from telebot import types
 import os
 
 TOKEN = os.getenv("TOKEN")  # Токен берётся из переменных окружения
-ADMIN_ID = 7070126954  # Твой Telegram ID для первого админа
+ADMIN_ID = 7070126954  # Первый админ
 
 bot = telebot.TeleBot(TOKEN)
 
@@ -122,10 +122,10 @@ def start(message, role):
 @access_required
 def addcard(message, role):
     if role == "admin":
-        text = ("Вставьте карточку целиком в формате (админ):\n"
+        text = ("Вставьте карточку в формате (админ):\n"
                 "Имя: ...\nВозраст: ...\nАйди: ...\nЧасовой пояс: ...\nНик: ...\nСтатус: ...\nКомментарий: ...")
     else:
-        text = ("Вставьте карточку целиком в формате:\n"
+        text = ("Вставьте карточку в формате:\n"
                 "Имя: ...\nВозраст: ...\nАйди: ...\nЧасовой пояс: ...\nНик: ...")
     bot.send_message(
         message.chat.id,
@@ -177,15 +177,159 @@ def addcard_steps(message):
 
         del user_states[message.from_user.id]
 
+# ---------- CHECK ----------
+@bot.message_handler(commands=["check"])
+@access_required
+def check(message, role):
+    try:
+        query = " ".join(message.text.split()[1:])
+    except:
+        bot.send_message(message.chat.id, "⚠️ Укажите ID или Ник", reply_markup=get_main_keyboard(message.from_user.id))
+        return
+
+    cursor.execute("""
+        SELECT uid, nickname, status FROM cards
+        WHERE uid LIKE ? OR nickname LIKE ?
+    """, (f"%{query}%", f"%{query}%"))
+    rows = cursor.fetchall()
+    log_action(message.from_user.id, "check", query)
+
+    if not rows:
+        bot.send_message(message.chat.id, "❌ Ничего не найдено", reply_markup=get_main_keyboard(message.from_user.id))
+        return
+
+    if len(rows) == 1:
+        c = rows[0]
+        cursor.execute("SELECT * FROM cards WHERE uid = ?", (c[0],))
+        c_full = cursor.fetchone()
+        text = (
+            f"🗓 Описание карточки\n\n"
+            f"Имя: {c_full[1]}\nВозраст: {c_full[2]}\nАйди: {c_full[3]}\nЧасовой пояс: {c_full[4]}\n"
+            f"Ник: {c_full[5]}\nStatus: {c_full[6]}\nКомментарий: {c_full[7]}"
+        )
+        bot.send_message(message.chat.id, text, reply_markup=get_main_keyboard(message.from_user.id))
+    else:
+        msg = "🔍 Найдено несколько:\n\n"
+        for r in rows:
+            msg += f"{r[1]} | {r[0]} | {r[2]}\n"
+        bot.send_message(message.chat.id, msg, reply_markup=get_main_keyboard(message.from_user.id))
+
+# ---------- HISTORY ----------
+@bot.message_handler(commands=["history"])
+@access_required
+def history(message, role):
+    try:
+        uid = message.text.split()[1]
+    except:
+        bot.send_message(message.chat.id, "⚠️ Укажите ID", reply_markup=get_main_keyboard(message.from_user.id))
+        return
+
+    cursor.execute("SELECT old_status, new_status, date FROM status_history WHERE uid = ?", (uid,))
+    rows = cursor.fetchall()
+
+    if not rows:
+        bot.send_message(message.chat.id, "📭 История пуста", reply_markup=get_main_keyboard(message.from_user.id))
+        return
+
+    msg = "🔁 История статусов:\n\n"
+    for r in rows:
+        msg += f"{r[2]}: {r[0]} → {r[1]}\n"
+
+    bot.send_message(message.chat.id, msg, reply_markup=get_main_keyboard(message.from_user.id))
+
+# ---------- LIST ----------
+@bot.message_handler(commands=["list"])
+@access_required
+def list_cards(message, role):
+    cursor.execute("SELECT nickname, uid, status FROM cards")
+    rows = cursor.fetchall()
+
+    if not rows:
+        bot.send_message(message.chat.id, "📭 База пуста", reply_markup=get_main_keyboard(message.from_user.id))
+        return
+
+    msg = "📋 Карточки:\n\n"
+    for r in rows:
+        msg += f"{r[0]} | {r[1]} | {r[2]}\n"
+
+    bot.send_message(message.chat.id, msg, reply_markup=get_main_keyboard(message.from_user.id))
+
+# ---------- SET STATUS ----------
+@bot.message_handler(commands=["setstatus"])
+@access_required
+def setstatus(message, role):
+    if role != "admin":
+        bot.send_message(message.chat.id, "⛔ Нет доступа", reply_markup=get_main_keyboard(message.from_user.id))
+        return
+    try:
+        _, uid, new_status = message.text.split(maxsplit=2)
+        cursor.execute("SELECT status FROM cards WHERE uid = ?", (uid,))
+        old_status = cursor.fetchone()[0]
+
+        cursor.execute("UPDATE cards SET status = ? WHERE uid = ?", (new_status, uid))
+        cursor.execute("""
+            INSERT INTO status_history VALUES (NULL, ?, ?, ?, ?, ?)
+        """, (uid, old_status, new_status, message.from_user.id, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+        conn.commit()
+        log_action(message.from_user.id, "set_status", uid)
+
+        bot.send_message(message.chat.id, "✅ Статус обновлён", reply_markup=get_main_keyboard(message.from_user.id))
+    except Exception as e:
+        bot.send_message(message.chat.id, f"⚠️ Ошибка: {e}", reply_markup=get_main_keyboard(message.from_user.id))
+
+# ---------- LOGS ----------
+@bot.message_handler(commands=["logs"])
+@access_required
+def logs(message, role):
+    if role != "admin":
+        bot.send_message(message.chat.id, "⛔ Нет доступа", reply_markup=get_main_keyboard(message.from_user.id))
+        return
+
+    cursor.execute("SELECT actor, action, target, date FROM logs ORDER BY id DESC LIMIT 15")
+    rows = cursor.fetchall()
+
+    msg = "🧾 Логи:\n\n"
+    for r in rows:
+        msg += f"{r[3]} | {r[0]} | {r[1]} | {r[2]}\n"
+
+    bot.send_message(message.chat.id, msg, reply_markup=get_main_keyboard(message.from_user.id))
+
+# ---------- ADD ADMIN ----------
+@bot.message_handler(commands=["addadmin"])
+@access_required
+def addadmin(message, role):
+    if role != "admin":
+        bot.send_message(message.chat.id, "⛔ Нет доступа", reply_markup=get_main_keyboard(message.from_user.id))
+        return
+    try:
+        _, uid, nickname = message.text.split(maxsplit=2)
+        uid = int(uid)
+        cursor.execute("INSERT OR IGNORE INTO users VALUES (?, 'admin', ?)", (uid, nickname))
+        conn.commit()
+        bot.send_message(message.chat.id, f"✅ Админ {nickname} добавлен", reply_markup=get_main_keyboard(message.from_user.id))
+    except:
+        bot.send_message(message.chat.id, "⚠️ Ошибка формата команды", reply_markup=get_main_keyboard(message.from_user.id))
+
+# ---------- DEL ADMIN ----------
+@bot.message_handler(commands=["deladmin"])
+@access_required
+def deladmin(message, role):
+    if role != "admin":
+        bot.send_message(message.chat.id, "⛔ Нет доступа", reply_markup=get_main_keyboard(message.from_user.id))
+        return
+    try:
+        uid = int(message.text.split()[1])
+        cursor.execute("DELETE FROM users WHERE user_id = ?", (uid,))
+        conn.commit()
+        bot.send_message(message.chat.id, "🗑 Админ удалён", reply_markup=get_main_keyboard(message.from_user.id))
+    except:
+        bot.send_message(message.chat.id, "⚠️ Ошибка формата команды", reply_markup=get_main_keyboard(message.from_user.id))
+
 # ---------- BUTTONS HANDLER ----------
 @bot.message_handler(func=lambda m: True)
 @access_required
 def buttons_handler(message, role):
     user_id = message.from_user.id
-
-    # Любая команда или кнопка, начинающая действие, ставит клавиатуру с "Отмена"
-    cancel_keyboard = get_main_keyboard(user_id, include_cancel=True)
-
     if message.text == "Меню":
         msg = "📌 Главное меню:\n/addcard — добавить карточку\n/check ID или НИК — поиск карточки\n/history ID — история статусов\n/list — список карточек"
         bot.send_message(message.chat.id, msg, reply_markup=get_main_keyboard(user_id))
@@ -197,11 +341,9 @@ def buttons_handler(message, role):
     elif message.text == "Добавить карточку":
         addcard(message, role)
     elif message.text == "Отмена":
+        if user_id in user_states:
+            del user_states[user_id]
         bot.send_message(message.chat.id, "❌ Действие отменено", reply_markup=get_main_keyboard(user_id))
-    else:
-        # Для любых действий, которые требуют ответа — включаем кнопку "Отмена"
-        user_states[user_id] = {"step": "action_wait", "role": role}
-        bot.send_message(message.chat.id, f"Вы начали действие: {message.text}", reply_markup=cancel_keyboard)
 
 # ---------- RUN ----------
 bot.infinity_polling()
