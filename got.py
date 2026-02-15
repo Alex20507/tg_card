@@ -4,7 +4,7 @@ from datetime import datetime
 from telebot import types
 import os
 
-TOKEN = os.getenv("TOKEN")  # Токен берётся из переменных окружения
+TOKEN = os.getenv("TOKEN")  # Или вставь прямо токен для проверки
 ADMIN_ID = 7070126954  # Твой Telegram ID для первого админа
 
 bot = telebot.TeleBot(TOKEN)
@@ -106,12 +106,20 @@ user_states = {}
 
 # ---------- START ----------
 @bot.message_handler(commands=["start"])
-@access_required
-def start(message, role):
+def start(message):
+    # Авто-добавление нового пользователя
+    cursor.execute("SELECT role FROM users WHERE user_id=?", (message.from_user.id,))
+    row = cursor.fetchone()
+    if not row:
+        cursor.execute(
+            "INSERT INTO users (user_id, role, nickname) VALUES (?, 'user', ?)",
+            (message.from_user.id, message.from_user.first_name)
+        )
+        conn.commit()
+    role = get_role(message.from_user.id)
     bot.send_message(
         message.chat.id,
-        f"🗂 Card Database Bot\nРоль: {role}\n\n"
-        "Используйте кнопки внизу или команды",
+        f"🗂 Card Database Bot\nРоль: {role}\n\nИспользуйте кнопки внизу или команды",
         reply_markup=get_main_keyboard(role)
     )
 
@@ -120,7 +128,6 @@ def start(message, role):
 @access_required
 def addcard(message, role):
     if role == "admin":
-        # Админ вставляет полный шаблон
         bot.send_message(
             message.chat.id,
             "Вставьте карточку целиком в формате:\n"
@@ -129,7 +136,6 @@ def addcard(message, role):
         )
         user_states[message.from_user.id] = {"step": "wait_card_admin", "role": role}
     else:
-        # Пользователь пошагово
         bot.send_message(
             message.chat.id,
             "Введите имя:",
@@ -139,7 +145,6 @@ def addcard(message, role):
 
 @bot.message_handler(func=lambda m: m.from_user.id in user_states)
 def addcard_steps(message):
-    # Проверка отмены
     if message.text == "Отмена":
         state = user_states[message.from_user.id]
         bot.send_message(message.chat.id, "❌ Действие отменено", reply_markup=get_main_keyboard(state.get("role")))
@@ -149,7 +154,7 @@ def addcard_steps(message):
     state = user_states[message.from_user.id]
     role = state.get("role")
 
-    # ------------------- Админ -------------------
+    # --- Админ ---
     if state.get("step") == "wait_card_admin":
         try:
             lines = message.text.split("\n")
@@ -180,15 +185,13 @@ def addcard_steps(message):
             bot.send_message(message.chat.id, f"⚠️ Ошибка: формат неверный или ID уже есть\n{e}", reply_markup=get_main_keyboard(role))
         del user_states[message.from_user.id]
 
-    # ------------------- Обычный пользователь -------------------
+    # --- Обычный пользователь ---
     elif state.get("step", "").startswith("user_add_"):
         data = state.get("data", {})
-
         if state["step"] == "user_add_name":
             data["name"] = message.text.strip()
             bot.send_message(message.chat.id, "Введите возраст:", reply_markup=get_main_keyboard(role, include_cancel=True))
             state["step"] = "user_add_age"
-
         elif state["step"] == "user_add_age":
             try:
                 data["age"] = int(message.text.strip())
@@ -196,20 +199,16 @@ def addcard_steps(message):
                 state["step"] = "user_add_id"
             except:
                 bot.send_message(message.chat.id, "⚠️ Введите число для возраста", reply_markup=get_main_keyboard(role, include_cancel=True))
-
         elif state["step"] == "user_add_id":
             data["uid"] = message.text.strip()
             bot.send_message(message.chat.id, "Введите часовой пояс:", reply_markup=get_main_keyboard(role, include_cancel=True))
             state["step"] = "user_add_timezone"
-
         elif state["step"] == "user_add_timezone":
             data["timezone"] = message.text.strip()
             bot.send_message(message.chat.id, "Введите ник:", reply_markup=get_main_keyboard(role, include_cancel=True))
             state["step"] = "user_add_nickname"
-
         elif state["step"] == "user_add_nickname":
             data["nickname"] = message.text.strip()
-            # статус и комментарий доступны только админу
             data["status"] = "active🟢"
             data["comment"] = ""
             try:
@@ -227,9 +226,6 @@ def addcard_steps(message):
             except Exception as e:
                 bot.send_message(message.chat.id, f"⚠️ Ошибка: {e}", reply_markup=get_main_keyboard(role))
             del user_states[message.from_user.id]
-
-# ---------- Другие команды (setstatus, addadmin, deladmin, adduser, check, history, list, logs) ----------
-# Их можно оставить как в предыдущей пошаговой версии, они работают так же с кнопкой "Отмена"
 
 # ---------- RUN ----------
 bot.infinity_polling()
