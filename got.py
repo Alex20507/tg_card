@@ -4,7 +4,7 @@ from datetime import datetime
 from telebot import types
 import os
 
-TOKEN = os.getenv("TOKEN")  # Или вставь прямо токен для проверки
+TOKEN = os.getenv("TOKEN")  # Токен берём из переменных окружения
 ADMIN_ID = 7070126954  # Твой Telegram ID для первого админа
 
 bot = telebot.TeleBot(TOKEN)
@@ -143,6 +143,7 @@ def addcard(message, role):
         )
         user_states[message.from_user.id] = {"step": "user_add_name", "role": role, "data": {}}
 
+# ---------- STEPS HANDLER ----------
 @bot.message_handler(func=lambda m: m.from_user.id in user_states)
 def addcard_steps(message):
     if message.text == "Отмена":
@@ -226,6 +227,37 @@ def addcard_steps(message):
             except Exception as e:
                 bot.send_message(message.chat.id, f"⚠️ Ошибка: {e}", reply_markup=get_main_keyboard(role))
             del user_states[message.from_user.id]
+
+# ---------- BUTTONS ----------
+@bot.message_handler(func=lambda m: m.text in ["Меню", "Команды", "Добавить карточку"])
+@access_required
+def buttons_handler(message, role):
+    if message.text == "Меню":
+        bot.send_message(
+            message.chat.id,
+            "📌 Главное меню:\n"
+            "/addcard — добавить карточку\n"
+            "/check ID или НИК — поиск карточки\n"
+            "/history ID — история статусов\n"
+            "/list — список карточек",
+            reply_markup=get_main_keyboard(role)
+        )
+    elif message.text == "Команды":
+        msg = "📋 Все команды:\n\n" \
+              "🔹 Пользовательские:\n" \
+              "/addcard — добавить карточку\n" \
+              "/check ID или НИК — поиск карточки\n" \
+              "/history ID — история статусов\n" \
+              "/list — список карточек\n\n"
+        if role == "admin":
+            msg += "🛠 Админ команды:\n" \
+                   "/setstatus ID СТАТУС — изменить статус карточки\n" \
+                   "/addadmin ID НИК — добавить админа\n" \
+                   "/deladmin ID — удалить админа\n" \
+                   "/logs — посмотреть последние действия"
+        bot.send_message(message.chat.id, msg, reply_markup=get_main_keyboard(role))
+    elif message.text == "Добавить карточку":
+        bot.send_message(message.chat.id, "Используйте команду /addcard для добавления карточки", reply_markup=get_main_keyboard(role))
 
 # ---------- RUN ----------
 bot.infinity_polling()
