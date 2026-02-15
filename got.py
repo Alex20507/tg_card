@@ -182,6 +182,10 @@ def addcard_steps(message):
 @access_required
 def buttons_handler(message, role):
     user_id = message.from_user.id
+
+    # Любая команда или кнопка, начинающая действие, ставит клавиатуру с "Отмена"
+    cancel_keyboard = get_main_keyboard(user_id, include_cancel=True)
+
     if message.text == "Меню":
         msg = "📌 Главное меню:\n/addcard — добавить карточку\n/check ID или НИК — поиск карточки\n/history ID — история статусов\n/list — список карточек"
         bot.send_message(message.chat.id, msg, reply_markup=get_main_keyboard(user_id))
@@ -194,6 +198,10 @@ def buttons_handler(message, role):
         addcard(message, role)
     elif message.text == "Отмена":
         bot.send_message(message.chat.id, "❌ Действие отменено", reply_markup=get_main_keyboard(user_id))
+    else:
+        # Для любых действий, которые требуют ответа — включаем кнопку "Отмена"
+        user_states[user_id] = {"step": "action_wait", "role": role}
+        bot.send_message(message.chat.id, f"Вы начали действие: {message.text}", reply_markup=cancel_keyboard)
 
 # ---------- RUN ----------
 bot.infinity_polling()
