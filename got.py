@@ -4,7 +4,7 @@ from datetime import datetime
 from telebot import types
 import os
 
-TOKEN = os.getenv("TOKEN")  # Токен из переменных окружения
+TOKEN = os.getenv("TOKEN")  # Токен берётся из переменных окружения
 ADMIN_ID = 7070126954       # Твой Telegram ID для первого админа
 
 bot = telebot.TeleBot(TOKEN)
@@ -65,6 +65,8 @@ cursor.execute(
 conn.commit()
 
 # ---------- HELPERS ----------
+user_states = {}
+
 def get_main_keyboard(role=None, include_cancel=False):
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
     if include_cancel:
@@ -76,23 +78,20 @@ def get_main_keyboard(role=None, include_cancel=False):
             keyboard.row("Добавить карточку")
     return keyboard
 
-def log_action(user_id, action, target_nickname=""):
-    cursor.execute("SELECT nickname FROM users WHERE user_id=?", (user_id,))
-    row = cursor.fetchone()
-    actor_nick = row[0] if row else "Неизвестно"
-
-    cursor.execute(
-        "INSERT INTO logs (user_id, actor, action, target, date) VALUES (?, ?, ?, ?, ?)",
-        (user_id, actor_nick, action, target_nickname, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-    )
-    conn.commit()
-
 def get_role(user_id):
     cursor.execute("SELECT role FROM users WHERE user_id = ?", (user_id,))
     r = cursor.fetchone()
     return r[0] if r else None
 
-user_states = {}
+def log_action(user_id, action, target_nickname=""):
+    cursor.execute("SELECT nickname FROM users WHERE user_id=?", (user_id,))
+    row = cursor.fetchone()
+    actor_nick = row[0] if row else "Неизвестно"
+    cursor.execute(
+        "INSERT INTO logs (user_id, actor, action, target, date) VALUES (?, ?, ?, ?, ?)",
+        (user_id, actor_nick, action, target_nickname, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    )
+    conn.commit()
 
 # ---------- START ----------
 @bot.message_handler(commands=["start"])
@@ -113,13 +112,8 @@ def start(message):
     bot.send_message(message.chat.id, text, reply_markup=get_main_keyboard(role))
 
 # ---------- ADD CARD ----------
-@bot.message_handler(commands=["addcard"])
 def addcard(message):
     role = get_role(message.from_user.id)
-    if not role:
-        bot.send_message(message.chat.id, "⛔ Нет доступа")
-        return
-
     if role == "admin":
         bot.send_message(
             message.chat.id,
@@ -136,23 +130,26 @@ def addcard(message):
         )
         user_states[message.from_user.id] = {"step": "user_add_name", "role": role, "data": {}}
 
-# ---------- BUTTONS HANDLER ----------
-@bot.message_handler(func=lambda m: True)
-def buttons_handler(message):
+@bot.message_handler(commands=["addcard"])
+def addcard_command(message):
+    addcard(message)
+
+# ---------- BUTTONS PANEL ----------
+@bot.message_handler(func=lambda m: m.text in ["Меню", "Команды", "Добавить карточку"])
+def panel_buttons(message):
     role = get_role(message.from_user.id)
     if not role:
         bot.send_message(message.chat.id, "⛔ Нет доступа")
         return
 
-    # ---------- Обычный пользователь ----------
-    if role != "admin":
-        if message.text == "Добавить карточку":
-            addcard(message)
-        else:
-            bot.send_message(message.chat.id, "⛔ Команда недоступна", reply_markup=get_main_keyboard(role))
+    if message.text == "Добавить карточку":
+        addcard(message)
         return
 
-    # ---------- Админ ----------
+    if role != "admin":
+        bot.send_message(message.chat.id, "⛔ Команда недоступна", reply_markup=get_main_keyboard(role))
+        return
+
     if message.text == "Меню":
         bot.send_message(
             message.chat.id,
@@ -179,12 +176,8 @@ def buttons_handler(message):
             "/logs — посмотреть логи",
             reply_markup=get_main_keyboard(role)
         )
-    elif message.text == "Добавить карточку":
-        addcard(message)
-    else:
-        bot.send_message(message.chat.id, "⛔ Неизвестная команда", reply_markup=get_main_keyboard(role))
 
-# ---------- STEPS HANDLER (Админ и пользователь пошагово) ----------
+# ---------- STEPS HANDLER ----------
 @bot.message_handler(func=lambda m: m.from_user.id in user_states)
 def steps_handler(message):
     if message.text == "Отмена":
@@ -205,7 +198,6 @@ def steps_handler(message):
                 if ":" in line:
                     key, value = line.split(":", 1)
                     data[key.strip().lower()] = value.strip()
-
             cursor.execute("""
                 INSERT INTO cards (name, age, uid, timezone, nickname, status, comment, added_by, date_added)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -232,23 +224,21 @@ def steps_handler(message):
     if state.get("step", "").startswith("user_add_"):
         data = state.get("data", {})
         step = state["step"]
-
         if step == "user_add_name":
             data["name"] = message.text
-            user_states[message.from_user.id]["step"] = "user_add_age"
-            user_states[message.from_user.id]["data"] = data
+            state["step"] = "user_add_age"
             bot.send_message(message.chat.id, "Введите возраст:", reply_markup=get_main_keyboard(role, include_cancel=True))
         elif step == "user_add_age":
             data["age"] = message.text
-            user_states[message.from_user.id]["step"] = "user_add_id"
+            state["step"] = "user_add_id"
             bot.send_message(message.chat.id, "Введите ID:", reply_markup=get_main_keyboard(role, include_cancel=True))
         elif step == "user_add_id":
             data["uid"] = message.text
-            user_states[message.from_user.id]["step"] = "user_add_timezone"
+            state["step"] = "user_add_timezone"
             bot.send_message(message.chat.id, "Введите часовой пояс:", reply_markup=get_main_keyboard(role, include_cancel=True))
         elif step == "user_add_timezone":
             data["timezone"] = message.text
-            user_states[message.from_user.id]["step"] = "user_add_nick"
+            state["step"] = "user_add_nick"
             bot.send_message(message.chat.id, "Введите Ник:", reply_markup=get_main_keyboard(role, include_cancel=True))
         elif step == "user_add_nick":
             data["nickname"] = message.text
