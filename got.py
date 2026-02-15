@@ -65,6 +65,15 @@ cursor.execute(
 conn.commit()
 
 # ---------- HELPERS ----------
+def get_admin_ids():
+    cursor.execute("SELECT user_id FROM users WHERE role='admin'")
+    return [row[0] for row in cursor.fetchall()]
+
+def get_role(user_id):
+    cursor.execute("SELECT role FROM users WHERE user_id = ?", (user_id,))
+    r = cursor.fetchone()
+    return r[0] if r else None
+
 def get_main_keyboard(user_id=None, include_cancel=False):
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
     if include_cancel:
@@ -86,15 +95,6 @@ def log_action(user_id, action, target_nickname=""):
         (user_id, actor_nick, action, target_nickname, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     )
     conn.commit()
-
-def get_role(user_id):
-    cursor.execute("SELECT role FROM users WHERE user_id = ?", (user_id,))
-    r = cursor.fetchone()
-    return r[0] if r else None
-
-def get_admin_ids():
-    cursor.execute("SELECT user_id FROM users WHERE role='admin'")
-    return [row[0] for row in cursor.fetchall()]
 
 def access_required(func):
     def wrapper(message, *args, **kwargs):
@@ -121,13 +121,18 @@ def start(message, role):
 @bot.message_handler(commands=["addcard"])
 @access_required
 def addcard(message, role):
+    if role == "admin":
+        text = ("Вставьте карточку целиком в формате (админ):\n"
+                "Имя: ...\nВозраст: ...\nАйди: ...\nЧасовой пояс: ...\nНик: ...\nСтатус: ...\nКомментарий: ...")
+    else:
+        text = ("Вставьте карточку целиком в формате:\n"
+                "Имя: ...\nВозраст: ...\nАйди: ...\nЧасовой пояс: ...\nНик: ...")
     bot.send_message(
         message.chat.id,
-        "Вставьте карточку целиком в формате:\n"
-        "Имя: ...\nВозраст: ...\nАйди: ...\nЧасовой пояс: ...\nНик: ...",
+        text,
         reply_markup=get_main_keyboard(include_cancel=True)
     )
-    user_states[message.from_user.id] = {"step": "wait_card"}
+    user_states[message.from_user.id] = {"step": "wait_card", "role": role}
 
 @bot.message_handler(func=lambda m: m.from_user.id in user_states)
 def addcard_steps(message):
@@ -137,6 +142,7 @@ def addcard_steps(message):
         return
 
     state = user_states[message.from_user.id]
+    role = state.get("role")
 
     if state.get("step") == "wait_card":
         try:
@@ -145,6 +151,9 @@ def addcard_steps(message):
             for line in lines:
                 key, value = line.split(":", 1)
                 data[key.strip().lower()] = value.strip()
+
+            status_value = data.get("статус") if role == "admin" else "active🟢"
+            comment_value = data.get("комментарий") if role == "admin" else ""
 
             cursor.execute("""
                 INSERT INTO cards (name, age, uid, timezone, nickname, status, comment, added_by, date_added)
@@ -155,8 +164,8 @@ def addcard_steps(message):
                 data.get("айди"),
                 data.get("часовой пояс"),
                 data.get("ник"),
-                data.get("status", "active🟢"),
-                data.get("comment", ""),
+                status_value,
+                comment_value,
                 message.from_user.id,
                 datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             ))
