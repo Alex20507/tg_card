@@ -4,8 +4,8 @@ from datetime import datetime
 from telebot import types
 import os
 
-TOKEN = os.getenv("TOKEN")  # Токен берётся из переменных окружения
-ADMIN_ID = 7070126954       # Твой Telegram ID для первого админа
+TOKEN = os.getenv("TOKEN")
+ADMIN_ID = 7070126954
 
 bot = telebot.TeleBot(TOKEN)
 
@@ -117,17 +117,12 @@ def addcard(message):
     if role == "admin":
         bot.send_message(
             message.chat.id,
-            "Вставьте карточку целиком в формате:\n"
-            "Имя: ...\nВозраст: ...\nАйди: ...\nЧасовой пояс: ...\nНик: ...\nСтатус: ...\nКомментарий: ...",
+            "Вставьте карточку целиком:\nИмя: ...\nВозраст: ...\nАйди: ...\nЧасовой пояс: ...\nНик: ...\nСтатус: ...\nКомментарий: ...",
             reply_markup=get_main_keyboard(role, include_cancel=True)
         )
         user_states[message.from_user.id] = {"step": "wait_card_admin", "role": role}
     else:
-        bot.send_message(
-            message.chat.id,
-            "Введите имя:",
-            reply_markup=get_main_keyboard(role, include_cancel=True)
-        )
+        bot.send_message(message.chat.id, "Введите имя:", reply_markup=get_main_keyboard(role, include_cancel=True))
         user_states[message.from_user.id] = {"step": "user_add_name", "role": role, "data": {}}
 
 @bot.message_handler(commands=["addcard"])
@@ -151,31 +146,9 @@ def panel_buttons(message):
         return
 
     if message.text == "Меню":
-        bot.send_message(
-            message.chat.id,
-            "📌 Главное меню:\n"
-            "/addcard — добавить карточку\n"
-            "/check — поиск карточки\n"
-            "/history — история статусов\n"
-            "/list — список карточек",
-            reply_markup=get_main_keyboard(role)
-        )
+        bot.send_message(message.chat.id, "📌 Главное меню:\n/addcard — добавить карточку\n/check — поиск\n/history — история\n/list — список", reply_markup=get_main_keyboard(role))
     elif message.text == "Команды":
-        bot.send_message(
-            message.chat.id,
-            "📋 Все команды:\n"
-            "🔹 Пользовательские:\n"
-            "/addcard — добавить карточку\n"
-            "/check — поиск карточки\n"
-            "/history — история статусов\n"
-            "/list — список карточек\n\n"
-            "🛠 Админ команды:\n"
-            "/setstatus — изменить статус\n"
-            "/addadmin — добавить админа\n"
-            "/deladmin — удалить админа\n"
-            "/logs — посмотреть логи",
-            reply_markup=get_main_keyboard(role)
-        )
+        bot.send_message(message.chat.id, "📋 Все команды:\n🔹 Пользовательские: /addcard, /check, /history, /list\n🛠 Админ команды: /setstatus, /addadmin, /deladmin, /logs", reply_markup=get_main_keyboard(role))
 
 # ---------- STEPS HANDLER ----------
 @bot.message_handler(func=lambda m: m.from_user.id in user_states)
@@ -216,7 +189,7 @@ def steps_handler(message):
             log_action(message.from_user.id, "add_card", data.get("ник"))
             bot.send_message(message.chat.id, "✅ Карточка добавлена", reply_markup=get_main_keyboard(role))
         except Exception as e:
-            bot.send_message(message.chat.id, f"⚠️ Ошибка: формат неверный или ID уже есть\n{e}", reply_markup=get_main_keyboard(role))
+            bot.send_message(message.chat.id, f"⚠️ Ошибка: {e}", reply_markup=get_main_keyboard(role))
         del user_states[message.from_user.id]
         return
 
@@ -261,5 +234,8 @@ def steps_handler(message):
                 log_action(message.from_user.id, "add_card", data["nickname"])
                 bot.send_message(message.chat.id, "✅ Карточка добавлена", reply_markup=get_main_keyboard(role))
             except Exception as e:
-                bot.send_message(message.chat.id, f"⚠️ Ошибка: формат неверный или ID уже есть\n{e}", reply_markup=get_main_keyboard(role))
+                bot.send_message(message.chat.id, f"⚠️ Ошибка: {e}", reply_markup=get_main_keyboard(role))
             del user_states[message.from_user.id]
+
+# ---------- RUN ----------
+bot.infinity_polling()
